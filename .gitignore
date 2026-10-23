@@ -1,0 +1,21 @@
+
+# Python
+.venv/
+__pycache__/
+.DS_Store
+
+# Dataset and generated files
+data/raw/
+data/processed/
+models/
+results/figures/
+
+# Secrets and local journal
+.streamlit/secrets.toml
+cinema_journal.json
+
+# Local backups and environment variables
+app_backup.py
+app_security_backup.py
+.env
+printf '\n' >> .gitignore
