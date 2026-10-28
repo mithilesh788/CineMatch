@@ -4,6 +4,7 @@ import os
 import re
 import sys
 import html
+import logging
 from difflib import SequenceMatcher
 
 import pandas as pd
@@ -54,6 +55,7 @@ TMDB_API_KEY_DEFAULT = load_tmdb_api_key_default()
 
 TMDB_BASE_URL = "https://api.themoviedb.org/3"
 TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p/w500"
+POSTER_LOGGER = logging.getLogger("cinematch.poster")
 
 
 # ==================================================
@@ -422,8 +424,32 @@ def get_poster(title, year=None, api_key=""):
                 if poster:
                     return f"{TMDB_IMAGE_BASE}{poster}"
 
-            except (requests.RequestException, ValueError):
-                pass
+                POSTER_LOGGER.warning(
+                    "TMDb poster not matched: title=%r year=%r query=%r candidates=%s",
+                    clean_title,
+                    year,
+                    clean_title,
+                    [
+                        {
+                            "id": item.get("id"),
+                            "title": item.get("title"),
+                            "original_title": item.get("original_title"),
+                            "has_poster": bool(item.get("poster_path")),
+                        }
+                        for item in results[:10]
+                    ],
+                )
+
+            except (requests.RequestException, ValueError) as exc:
+                status = getattr(getattr(exc, "response", None), "status_code", None)
+                POSTER_LOGGER.warning(
+                    "TMDb poster request failed: title=%r year=%r query=%r error=%s status=%s",
+                    clean_title,
+                    year,
+                    clean_title,
+                    type(exc).__name__,
+                    status,
+                )
 
         # Retry without the release year.
         try:
@@ -444,8 +470,32 @@ def get_poster(title, year=None, api_key=""):
             if poster:
                 return f"{TMDB_IMAGE_BASE}{poster}"
 
-        except (requests.RequestException, ValueError):
-            pass
+            POSTER_LOGGER.warning(
+                "TMDb poster not matched: title=%r year=%r query=%r candidates=%s",
+                clean_title,
+                year,
+                clean_title,
+                [
+                    {
+                        "id": item.get("id"),
+                        "title": item.get("title"),
+                        "original_title": item.get("original_title"),
+                        "has_poster": bool(item.get("poster_path")),
+                    }
+                    for item in results[:10]
+                ],
+            )
+
+        except (requests.RequestException, ValueError) as exc:
+            status = getattr(getattr(exc, "response", None), "status_code", None)
+            POSTER_LOGGER.warning(
+                "TMDb poster request failed: title=%r year=%r query=%r error=%s status=%s",
+                clean_title,
+                year,
+                clean_title,
+                type(exc).__name__,
+                status,
+            )
 
     # Try OMDb if TMDb did not return a poster.
     if OMDB_API_KEY:
@@ -479,6 +529,13 @@ def get_poster(title, year=None, api_key=""):
         except (requests.RequestException, ValueError):
             pass
 
+    POSTER_LOGGER.warning(
+        "No poster found: title=%r year=%r tmdb_key_configured=%s omdb_key_configured=%s",
+        clean_title,
+        year,
+        bool(api_key),
+        bool(OMDB_API_KEY),
+    )
     return None
 
 
@@ -801,7 +858,7 @@ def movie_match_score(movie, preferred_genres=None, mood_genres=None, runtime_li
 
 def show_smart_tmdb_movies(items, genre_map, preferred_genres=None,
                            mood_genres=None, runtime_limit=None, limit=12,
-                           reason_label="Preference match"):
+                           reason_label="Preference match", preserve_order=False):
     """Render TMDb results with an explainable CineMatch score and save option."""
     if not items:
         st.info("No movies matched those filters. Try broadening your preferences.")
@@ -815,7 +872,11 @@ def show_smart_tmdb_movies(items, genre_map, preferred_genres=None,
         )
         enriched.append(movie)
 
-    enriched.sort(key=lambda x: (x["_cine_score"], x.get("vote_average", 0)), reverse=True)
+    if not preserve_order:
+        enriched.sort(
+            key=lambda x: (x["_cine_score"], x.get("vote_average", 0)),
+            reverse=True,
+        )
     st.session_state["last_tmdb_results"] = [
         {
             "id": m.get("id"),
@@ -1173,7 +1234,7 @@ with tabs[3]:
                 )
                 runtime_limit = st.select_slider(
                     "Maximum runtime",
-                    options=[90, 105, 120, 135, 150, 180],
+                    options=[90, 105, 120, 135, 150, 180, 210, 240, 270, 300],
                     value=135,
                     format_func=lambda value: f"{value} minutes",
                     key="party_runtime",
@@ -1272,7 +1333,11 @@ with tabs[4]:
             if st.button("Discover hidden treasures", type="primary",
                          width="stretch", key="hidden_tmdb_button"):
                 params = {
-                    "sort_by": "vote_average.desc",
+                    "sort_by": (
+                        "vote_count.asc"
+                        if treasure_sort == "Least known"
+                        else "vote_average.desc"
+                    ),
                     "vote_average.gte": minimum_rating,
                     "vote_count.gte": 50,
                     "vote_count.lte": max_votes,
@@ -1317,6 +1382,7 @@ with tabs[4]:
                                 if hidden_genre != "Any genre" else [],
                                 limit=12,
                                 reason_label="Hidden Treasure ranking",
+                                preserve_order=True,
                             )
                         else:
                             st.info("No movies match all these filters. Try increasing the vote limit or lowering the rating.")

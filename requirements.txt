@@ -7,3 +7,4 @@ seaborn
 streamlit
 joblib
 requests
+python-dotenv
